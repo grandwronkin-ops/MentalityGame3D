@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>MentalityGame 3D Online</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#101820;color:white;font-family:system-ui;touch-action:none}#game{position:fixed;inset:0}canvas{display:block}
+.panel{background:#081522eF;border:1px solid #ffffff30;border-radius:14px;padding:12px;backdrop-filter:blur(8px)}
+#auth{position:fixed;inset:0;z-index:10;display:grid;place-items:center;background:#07111ddd;padding:18px}
+#authbox{width:min(360px,100%)}h2{margin:0 0 5px}p{color:#b8cad7;font-size:13px}
+input,button,select{font:inherit;border-radius:9px;padding:11px;border:1px solid #ffffff30;background:#142536;color:white;width:100%;margin:5px 0}
+button{background:#17658a;font-weight:700}#top{position:fixed;top:10px;left:10px;right:10px;display:flex;justify-content:space-between;gap:8px;pointer-events:none}#brand,#online{pointer-events:auto}
+#brand{font-weight:800}#online{font-size:12px}
+#chat{position:fixed;left:10px;top:65px;width:min(300px,68vw);pointer-events:auto}
+#messages{height:105px;overflow:auto;font-size:12px;color:#e1edf5;overflow-wrap:anywhere}
+#chatrow{display:flex;gap:5px}#chatrow input{margin:0;min-width:0}#chatrow button{width:65px;margin:0}
+#staff{position:fixed;right:10px;top:65px;width:min(270px,70vw);max-height:48vh;overflow:auto;display:none;pointer-events:auto;font-size:12px}
+#staff button{padding:7px;font-size:11px}#joy{position:fixed;left:20px;bottom:22px;width:120px;height:120px;border-radius:50%;border:2px solid #ffffff66;background:#ffffff20;touch-action:none}
+#stick{position:absolute;left:34px;top:34px;width:48px;height:48px;border-radius:50%;background:#d9efffcc;border:2px solid white}
+#hint{position:fixed;bottom:8px;left:50%;transform:translateX(-50%);font-size:11px;background:#071522bb;padding:6px 10px;border-radius:10px;white-space:nowrap}
+@media(min-width:850px){#joy{display:none}}
+</style></head><body><div id="game"></div>
+<div id="auth"><div id="authbox" class="panel"><h2>MENTALITYGAME 3D</h2><p>Browser multiplayer city. Register or login to enter.</p><input id="username" placeholder="Username" maxlength="18"><input id="password" placeholder="Password" type="password" maxlength="128"><button id="login">LOGIN</button><button id="register">CREATE ACCOUNT</button><p id="authmsg"></p></div></div>
+<div id="top"><div id="brand" class="panel">MENTALITYGAME 3D</div><div id="online" class="panel">Connecting…</div></div>
+<div id="chat" class="panel"><div id="messages"></div><div id="chatrow"><input id="say" placeholder="Chat message" maxlength="180"><button id="send">SEND</button></div></div>
+<div id="staff" class="panel"></div><div id="joy"><div id="stick"></div></div><button id="drive" style="position:fixed;right:18px;bottom:25px;width:76px;height:76px;border-radius:50%;z-index:3">DRIVE</button><div id="hint">Joystick / WASD to move • Chat with online players</div>
+<script src="/socket.io/socket.io.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+let token=localStorage.getItem('mg_token')||'', me=null, socket=null, scene,camera,renderer,player, yaw=0, remotes=new Map(), keys={}, joyX=0,joyY=0;
+const $=id=>document.getElementById(id);
+function api(path,body){return fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(async r=>{let j=await r.json();if(!r.ok)throw Error(j.error||'Request failed');return j;});}
+$('login').onclick=()=>enter('/api/login');$('register').onclick=()=>enter('/api/register');
+async function enter(path){$('authmsg').textContent='Please wait…';try{let r=await api(path,{username:$('username').value,password:$('password').value});token=r.token;me=r.user;localStorage.setItem('mg_token',token);$('auth').style.display='none';startGame();}catch(e){$('authmsg').textContent=e.message;}}
+if(token){fetch('/api/me',{headers:{Authorization:'Bearer '+token}}).then(r=>r.ok?r.json():Promise.reject()).then(r=>{me=r.user;$('auth').style.display='none';startGame();}).catch(()=>{localStorage.removeItem('mg_token');token='';});}
+function startGame(){
+ if(!window.THREE){$('authmsg').textContent='3D engine could not load. Check internet.';return;}
+ scene=new THREE.Scene();scene.background=new THREE.Color(0x8fb6c8);scene.fog=new THREE.Fog(0x8fb6c8,55,180);
+ camera=new THREE.PerspectiveCamera(68,innerWidth/innerHeight,.1,300);
+ renderer=new THREE.WebGLRenderer({antialias:false});renderer.setPixelRatio(Math.min(devicePixelRatio,1.4));renderer.setSize(innerWidth,innerHeight);$('game').appendChild(renderer.domElement);
+ scene.add(new THREE.HemisphereLight(0xe4f5ff,0x53606b,1.35));let sun=new THREE.DirectionalLight(0xffedcf,1);sun.position.set(-30,60,20);scene.add(sun);
+ const mat=c=>new THREE.MeshStandardMaterial({color:c,roughness:.85});
+ let floor=new THREE.Mesh(new THREE.PlaneGeometry(220,220),mat(0x65796e));floor.rotation.x=-Math.PI/2;scene.add(floor);
+ for(let k=-3;k<=3;k++){let a=new THREE.Mesh(new THREE.BoxGeometry(6,.04,220),mat(0x252b31));a.position.set(k*28,0,0);scene.add(a);let b=new THREE.Mesh(new THREE.BoxGeometry(220,.04,6),mat(0x252b31));b.position.set(0,.01,k*28);scene.add(b);}
+ let colors=[0x9caaa9,0xc3b8a4,0x718895,0xb1a18f,0x78817f,0x9dabb5];
+ for(let x=-3;x<=3;x++)for(let z=-3;z<=3;z++)for(let n=0;n<3;n++){let w=5+Math.random()*6,d=5+Math.random()*6,h=8+Math.random()*27;let b=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat(colors[Math.floor(Math.random()*colors.length)]));b.position.set(x*28+(Math.random()-.5)*12,h/2,z*28+(Math.random()-.5)*12);scene.add(b);}
+ player=makeAvatar(0x236f9d);scene.add(player);player.position.set(0,0,0);
+ let car=new THREE.Group(), carPaint=new THREE.MeshStandardMaterial({color:0xb52e35,roughness:.4}), carGlass=new THREE.MeshStandardMaterial({color:0x263f50});
+ let ch=new THREE.Mesh(new THREE.BoxGeometry(2,.65,4),carPaint);ch.position.y=.7;car.add(ch);
+ let cab=new THREE.Mesh(new THREE.BoxGeometry(1.6,.7,1.9),carGlass);cab.position.set(0,1.35,-.15);car.add(cab);
+ let wheels=[];for(let xx of [-1,1])for(let zz of [-1.3,1.3]){let wh=new THREE.Mesh(new THREE.CylinderGeometry(.38,.38,.24,12),new THREE.MeshStandardMaterial({color:0x17191c}));wh.rotation.z=Math.PI/2;wh.position.set(xx,.4,zz);car.add(wh);wheels.push(wh);}
+ car.position.set(3,0,8);scene.add(car);let driving=false,carSpeed=0,carYaw=0;
+ $('drive').onclick=()=>{if(!driving&&player.position.distanceTo(car.position)<7){driving=true;player.visible=false;$('drive').textContent='EXIT';}else if(driving){driving=false;player.visible=true;player.position.set(car.position.x+2.5,0,car.position.z);$('drive').textContent='DRIVE';}else{addMessage('Walk closer to the red car to drive.');}};
+ socket=io({auth:{token}});
+ socket.on('connect',()=>{$('online').textContent='Online • '+me.username+' • '+role(me.role);});
+ socket.on('connect_error',e=>{$('online').textContent='Server connection failed';});
+ socket.on('world:players',list=>list.forEach(p=>addRemote(p.id,p.username,p.role,p.x,p.z,p.yaw)));
+ socket.on('world:join',p=>addRemote(p.id,p.username,p.role,0,0,0));
+ socket.on('world:leave',p=>{let o=remotes.get(p.id);if(o){scene.remove(o.group);remotes.delete(p.id);}});
+ socket.on('player:moved',p=>{let o=remotes.get(p.id);if(o){o.group.position.set(p.x,0,p.z);o.group.rotation.y=p.yaw;}});
+ socket.on('chat:message',m=>{let line=document.createElement('div');line.textContent='['+m.roleName+'] '+m.username+': '+m.message;$('messages').appendChild(line);$('messages').scrollTop=$('messages').scrollHeight;});
+ socket.on('system:notice',m=>addMessage('SYSTEM: '+m));
+ if(me.role>0){$('staff').style.display='block';loadStaff();}
+}
+function role(r){return r===7?'Founder L7':r>0?'Admin L'+r:'Player';}
+function makeAvatar(color){let g=new THREE.Group(),m=new THREE.MeshStandardMaterial({color});let body=new THREE.Mesh(new THREE.CylinderGeometry(.4,.48,1.2,9),m);body.position.y=.9;g.add(body);let h=new THREE.Mesh(new THREE.SphereGeometry(.3,10,8),new THREE.MeshStandardMaterial({color:0xd6a47d}));h.position.y=1.7;g.add(h);return g;}
+function addRemote(id,name,r,x,z,y){if(remotes.has(id))return;let g=makeAvatar(r===7?0xffc247:r>0?0x9c67c7:0x45a4c8);g.position.set(x||0,0,z||0);g.rotation.y=y||0;scene.add(g);remotes.set(id,{group:g,name,role:r});}
+function addMessage(t){let d=document.createElement('div');d.textContent=t;$('messages').appendChild(d);}
+$('send').onclick=()=>{let v=$('say').value.trim();if(v&&socket){socket.emit('chat:message',v);$('say').value='';}};
+$('say').addEventListener('keydown',e=>{if(e.key==='Enter')$('send').click();});
+async function loadStaff(){try{let r=await fetch('/api/admin/users',{headers:{Authorization:'Bearer '+token}});if(!r.ok)return;let data=await r.json();let panel=$('staff');panel.innerHTML='<b>STAFF CONTROL</b><div>Signed in: '+role(me.role)+'</div>';data.users.forEach(u=>{let row=document.createElement('div');row.style.borderTop='1px solid #ffffff22';row.style.padding='5px 0';let label=document.createElement('div');label.textContent=u.username+' — '+role(u.role);row.appendChild(label);if(me.role===7&&u.id!==me.id){let s=document.createElement('select');for(let i=0;i<=6;i++){let o=document.createElement('option');o.value=i;o.textContent=i===0?'Player':'Admin L'+i;o.selected=u.role===i;s.appendChild(o);}s.onchange=async()=>{try{await api('/api/founder/role',{userId:u.id,role:Number(s.value)});loadStaff();}catch(e){alert(e.message);}};row.appendChild(s);}else if(me.role>=3&&u.role<me.role&&u.role!==7){let b=document.createElement('button');b.textContent='BAN';b.onclick=async()=>{try{await api('/api/admin/ban',{userId:u.id,reason:'Staff moderation'});loadStaff();}catch(e){alert(e.message);}};row.appendChild(b);}panel.appendChild(row);});}catch(e){}}
+addEventListener('keydown',e=>keys[e.key.toLowerCase()]=true);addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+let joy=$('joy'),stick=$('stick'),jid=null;function joyMove(e){let r=joy.getBoundingClientRect(),dx=e.clientX-r.left-r.width/2,dy=e.clientY-r.top-r.height/2,l=Math.hypot(dx,dy),m=40;if(l>m){dx*=m/l;dy*=m/l;}joyX=dx/m;joyY=dy/m;stick.style.transform=`translate(${dx}px,${dy}px)`;}
+joy.onpointerdown=e=>{jid=e.pointerId;joy.setPointerCapture(jid);joyMove(e)};joy.onpointermove=e=>{if(e.pointerId===jid)joyMove(e)};function joyReset(){jid=null;joyX=joyY=0;stick.style.transform='translate(0,0)';}joy.onpointerup=joyReset;joy.onpointercancel=joyReset;
+let clock=new THREE.Clock(),sendT=0;
+function loop(){requestAnimationFrame(loop);if(!renderer)return;let dt=Math.min(clock.getDelta(),.04),f=(keys.w||keys.arrowup?1:0)-(keys.s||keys.arrowdown?1:0)-joyY,s=(keys.d||keys.arrowright?1:0)-(keys.a||keys.arrowleft?1:0)+joyX,m=Math.hypot(f,s);if(m>1){f/=m;s/=m;}if(driving){carSpeed+=f*12*dt;carSpeed*=Math.pow(.985,dt*60);carSpeed=THREE.MathUtils.clamp(carSpeed,-7,20);carYaw+=s*dt*1.5*(carSpeed>=0?1:-1)*Math.min(1,Math.abs(carSpeed)/4);car.rotation.y=carYaw;car.position.x+=Math.sin(carYaw)*carSpeed*dt;car.position.z+=Math.cos(carYaw)*carSpeed*dt;wheels.forEach(w=>w.rotation.x+=carSpeed*dt*1.8);player.position.copy(car.position);yaw=carYaw;}else if(m>.02){let a=yaw+Math.atan2(s,f),sp=(keys.shift?9:5)*dt;player.position.x+=Math.sin(a)*sp*m;player.position.z+=Math.cos(a)*sp*m;yaw=a;player.rotation.y=yaw;}let focus=driving?car:player;let target=new THREE.Vector3(focus.position.x,driving?2.5:2.2,focus.position.z);let camYaw=driving?carYaw:yaw;camera.position.lerp(target.clone().add(new THREE.Vector3(Math.sin(camYaw)*-(driving?9:7),driving?5:4,Math.cos(camYaw)*-(driving?9:7))),Math.min(1,dt*5));camera.lookAt(target);renderer.render(scene,camera);sendT+=dt;if(sendT>.08&&socket&&socket.connected){socket.emit('player:move',{x:focus.position.x,z:focus.position.z,yaw:camYaw});sendT=0;}}
+loop();
+addEventListener('resize',()=>{if(camera&&renderer){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);}});
+</script></body></html>
